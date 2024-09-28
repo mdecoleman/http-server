@@ -16,7 +16,7 @@ export class Server {
 
     const bytesRead = await connection.read(buffer);
 
-    if (bytesRead === null) throw Error("TODO: handle null request");
+    if (bytesRead === null) return null;
 
     const rawRequest = new TextDecoder().decode(buffer.subarray(0, bytesRead));
 
@@ -67,24 +67,45 @@ export class Server {
 
     return request;
   }
-  
+
   private async writeResponse(connection: Deno.Conn, response: string) {
     await connection.write(new TextEncoder().encode(response));
   }
 
   private async handleConnection(connection: Deno.Conn) {
     const request = await this.parseRequest(connection);
+
     const response = new ResponseBuilder();
 
-    for (let i = 0; i < this._routeHandlers.length; i++) {
-      const { handler, method, path } = this._routeHandlers[i];
+    if (!request) {
+      const response = new ResponseBuilder()
+        .setStatusCode(400)
+        .setBody("Bad Request")
+        .addHeader("Content-Type", "text/plain")
+        .build();
 
-      console.info("handler path", path);
-      console.info("request path", request.path);
+      await this.writeResponse(connection, response);
+
+      connection.close();
+
+      return;
+    }
+
+    let routeMatched = false;
+
+    for (const { handler, method, path } of this._routeHandlers) {
       if (method === request.method && path === request.path) {
         await handler(request, response);
+        routeMatched = true;
         break;
       }
+    }
+
+    if (!routeMatched) {
+      response
+        .setStatusCode(404)
+        .setBody("Not Found")
+        .addHeader("Content-Type", "text/plain");
     }
 
     await this.writeResponse(connection, response.build());
